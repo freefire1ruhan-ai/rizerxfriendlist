@@ -44,7 +44,7 @@ IV = bytes([54, 111, 121, 90, 68, 114, 50, 50, 69, 51, 121, 99, 104, 106, 77, 37
 
 # Region to server URL mapping
 REGION_SERVERS = {
-    "IN": "https://client.ind.freefiremobile.com",
+    "IND": "https://client.ind.freefiremobile.com",
     "ME": "https://clientbp.ggblueshark.com",
     "VN": "https://clientbp.ggpolarbear.com",
     "BD": "https://clientbp.ggwhitehawk.com",
@@ -54,7 +54,8 @@ REGION_SERVERS = {
     "NA": "https://client.us.freefiremobile.com",
     "ID": "https://clientbp.ggpolarbear.com",
     "RU": "https://clientbp.ggpolarbear.com",
-    "TH": "https://clientbp.ggpolarbear.com"
+    "TH": "https://clientbp.ggpolarbear.com",
+    "IN": "https://client.ind.freefiremobile.com"
 }
 
 # Default fallback server (if primary fails)
