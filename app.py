@@ -145,7 +145,7 @@ def get_friends_with_jwt(jwt_token, server_url=None):
             'Accept-Encoding': 'deflate, gzip',
             'Authorization': f'Bearer {jwt_token}',
             'X-GA': 'v1 1',
-            'ReleaseVersion': 'OB52',
+            'ReleaseVersion': 'OB53',
             'Content-Type': 'application/x-www-form-urlencoded',
             'X-Unity-Version': '2022.3.47f1'
         }
