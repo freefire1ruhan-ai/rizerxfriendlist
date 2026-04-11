@@ -1,10 +1,8 @@
 # -*- coding: utf-8 -*-
-# Complete Free Fire API – All endpoints return friend list directly
-# Vercel‑compatible: no temporary files, no dynamic imports, only embedded descriptors.
-
 import json
 import time
 import base64
+import hashlib
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -13,29 +11,29 @@ import requests
 import urllib3
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
+import google.protobuf
 from google.protobuf import json_format
 from google.protobuf import descriptor_pool
-from google.protobuf import symbol_database
 from google.protobuf.internal import builder
 
+# Disable SSL warnings (safe for serverless)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
 
 # ================================
-# 1. Friends protobuf (already embedded)
+# 1. Embedded Friends Protobuf (working as before)
 # ================================
 _friends_desc = descriptor_pool.Default().AddSerializedFile(
     b'\n\rFriends.proto\"\"\n\x06\x46riend\x12\n\n\x02ID\x18\x01 \x01(\x03\x12\x0c\n\x04Name\x18\x03 \x01(\t\"#\n\x07\x46riends\x12\x18\n\x07\x66ield_1\x18\x01 \x03(\x0b\x32\x07.Friendb\x06proto3'
 )
-_builder.BuildMessageAndEnumDescriptors(_friends_desc, globals())
-_builder.BuildTopDescriptorsAndMessages(_friends_desc, 'Friends_pb2', globals())
+builder.BuildMessageAndEnumDescriptors(_friends_desc, globals())
+builder.BuildTopDescriptorsAndMessages(_friends_desc, 'Friends_pb2', globals())
 Friends = globals().get('Friends')
 
 # ================================
-# 2. MajorLoginReq and MajorLoginRes protobufs (embedded, no file writes)
+# 2. MajorLoginReq and MajorLoginRes protobufs (embedded descriptors)
 # ================================
-# Base64 of MajorLoginReq.proto (full descriptor)
 _major_login_req_b64 = (
     "ChNNYWpvckxvZ2luUmVxLnByb3RvIvoKCgpNYWpvckxvZ2luEhIKCmV2ZW50X3RpbWUYAyABKAkSEQoJZ2FtZV9uYW1lGAQgASgJEhMKC3BsYXRmb3JtX2lkGAUgASgFEhYKDmNsaWVudF92ZXJzaW9uGAcgASgJEhcKD3N5c3RlbV9zb2Z0d2FyZRgIIAEoCRIXCg9zeXN0ZW1faGFyZHdhcmUYCSABKAkSGAoQdGVsZWNvbV9vcGVyYXRvchgKIAEoCRIUCgxuZXR3b3JrX3R5cGUYCyABKAkSFAoMc2NyZWVuX3dpZHRoGAwgASgNEhUKDXNjcmVlbl9oZWlnaHQYDSABKA0SEgoKc2NyZWVuX2RwaRgOIAEoCRIZChFwcm9jZXNzb3JfZGV0YWlscxgPIAEoCRIOCgZtZW1vcnkYECABKA0SFAoMZ3B1X3JlbmRlcmVyGBEgASgJEhMKC2dwdV92ZXJzaW9uGBIgASgJEhgKEHVuaXF1ZV9kZXZpY2VfaWQYEyABKAkSEQoJY2xpZW50X2lwGBQgASgJEhAKCGxhbmd1YWdlGBUgASgJEg8KB29wZW5faWQYFiABKAkSFAoMb3Blbl9pZF90eXBlGBcgASgJEhMKC2RldmljZV90eXBlGBggASgJEicKEG1lbW9yeV9hdmFpbGFibGUYGSABKAsyDS5HYW1lU2VjdXJpdHkSFAoMYWNjZXNzX3Rva2VuGB0gASgJEhcKD3BsYXRmb3JtX3Nka19pZBgeIAEoBRIaChJuZXR3b3JrX29wZXJhdG9yX2EYKSABKAkSFgoObmV0d29ya190eXBlX2EYKiABKAkSHAoUY2xpZW50X3VzaW5nX3ZlcnNpb24YOSABKAkSHgoWZXh0ZXJuYWxfc3RvcmFnZV90b3RhbBg8IAEoBRIiChpleHRlcm5hbF9zdG9yYWdlX2F2YWlsYWJsZRg9IAEoBRIeChhpbnRlcm5hbF9zdG9yYWdlX3RvdGFsGD4gASgFEiIKGmludGVybmFsX3N0b3JhZ2VfYXZhaWxhYmxlGD8gASgFEiMKG2dhbWVfZGlza19zdG9yYWdlX2F2YWlsYWJsZRhAIAEoBRIfChdnYW1lX2Rpc2tfc3RvcmFnZV90b3RhbBhBIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfYXZhaWxfc3RvcmFnZRhCIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfdG90YWxfc3RvcmFnZRhDIAEoBRIQCghsb2dpbl9ieRhJIAEoBRIUCgxsaWJyYXJ5X3BhdGgYSiABKAkSEgoKcmVnX2F2YXRhchhMIAEoBRIVCg1saWJyYXJ5X3Rva2VuGE0gASgJEhQKDGNoYW5uZWxfdHlwZRhOIAEoBRIQCghjcHVfdHlwZRhPIAEoBRIYChBjcHVfYXJjaGl0ZWN0dXJlGFEgASgJEhsKE2NsaWVudF92ZXJzaW9uX2NvZGUYUyABKAkSFAoMZ3JhcGhpY3NfYXBpGFYgASgJEh0KFXN1cHBvcnRlZF9hc3RjX2JpdHNldBhXIAEoDRIaChJsb2dpbl9vcGVuX2lkX3R5cGUYWCABKAUSGAoQYW5hbHl0aWNzX2RldGFpbBhZIAEoDBIUCgxsb2FkaW5nX3RpbWUYXCABKA0SFwoPcmVsZWFzZV9jaGFubmVsGF0gASgJEhIKCmV4dHJhX2luZm8YXiABKAkSIAoYYW5kcm9pZF9lbmdpbmVfaW5pdF9mbGFnGF8gASgNEg8KB2lmX3B1c2gYYSABKAUSDgoGaXNfdnBuGGIgASgFEhwKFG9yaWdpbl9wbGF0Zm9ybV90eXBlGGMgASgJEh0KFXByaW1hcnlfcGxhdGZvcm1fdHlwZRhkIAEoCSI1CgxHYW1lU2VjdXJpdHkSDwoHdmVyc2lvbhgGIAEoBRIUCgxoaWRkZW5fdmFsdWUYCCABKARiBnByb3RvMw=="
 )
@@ -45,19 +43,19 @@ _major_login_res_b64 = (
 
 # Add MajorLoginReq descriptor
 _req_desc = descriptor_pool.Default().AddSerializedFile(base64.b64decode(_major_login_req_b64))
-_builder.BuildMessageAndEnumDescriptors(_req_desc, globals())
-_builder.BuildTopDescriptorsAndMessages(_req_desc, 'MajorLoginReq_pb2', globals())
+builder.BuildMessageAndEnumDescriptors(_req_desc, globals())
+builder.BuildTopDescriptorsAndMessages(_req_desc, 'MajorLoginReq_pb2', globals())
 MajorLoginReq = globals().get('MajorLogin')
 GameSecurity = globals().get('GameSecurity')
 
 # Add MajorLoginRes descriptor
 _res_desc = descriptor_pool.Default().AddSerializedFile(base64.b64decode(_major_login_res_b64))
-_builder.BuildMessageAndEnumDescriptors(_res_desc, globals())
-_builder.BuildTopDescriptorsAndMessages(_res_desc, 'MajorLoginRes_pb2', globals())
+builder.BuildMessageAndEnumDescriptors(_res_desc, globals())
+builder.BuildTopDescriptorsAndMessages(_res_desc, 'MajorLoginRes_pb2', globals())
 MajorLoginRes = globals().get('MajorLoginRes')
 
 # ================================
-# 3. Constants and encryption helpers
+# 3. Constants (All Server URLs)
 # ================================
 FREEFIRE_VERSION = "OB53"
 FRIEND_ENDPOINT = "/GetFriend"
@@ -89,6 +87,9 @@ BASE_HEADERS = {
     'ReleaseVersion': "OB53"
 }
 
+# ================================
+# 4. Helper Functions
+# ================================
 def encrypt_friend_payload(hex_data: str) -> bytes:
     raw = bytes.fromhex(hex_data)
     cipher = AES.new(FRIEND_KEY, AES.MODE_CBC, FRIEND_IV)
@@ -254,6 +255,7 @@ def major_login(open_id, access_token):
         if resp.status_code != 200:
             return False, f"HTTP {resp.status_code}"
         data = resp.content
+        # Try decryption first (if response is encrypted)
         if len(data) % 16 == 0:
             dec = decrypt_proto(data)
             if dec:
@@ -261,6 +263,7 @@ def major_login(open_id, access_token):
                 res.ParseFromString(dec)
                 if res.token:
                     return True, {'token': res.token}
+        # Fallback: parse directly
         res = MajorLoginRes()
         res.ParseFromString(data)
         if res.token:
@@ -391,7 +394,7 @@ def get_jwt_from_access_token(access_token):
     return None, "All platform types failed"
 
 # ================================
-# 4. Flask routes – all return friend list directly
+# 5. Flask Routes (All Return Friend List Directly)
 # ================================
 @app.route("/")
 def home():
@@ -401,11 +404,16 @@ def home():
             "direct_jwt": "/<JWT>",
             "guest_login": "/guest?uid=<uid>&password=<password>",
             "access_token": "/access_token?access_token=<access_token>"
+        },
+        "examples": {
+            "guest": "/guest?uid=4346382256&password=your_password",
+            "access_token": "/access_token?access_token=your_access_token"
         }
     })
 
 @app.route("/<path:jwt>", methods=["GET"])
 def friend_list_direct(jwt):
+    """Get friend list using JWT directly"""
     if not jwt or jwt.count(".") != 2:
         return jsonify({"status": "error", "message": "Invalid JWT"}), 400
     friends, my_info = get_friend_list_from_jwt(jwt)
@@ -422,6 +430,7 @@ def friend_list_direct(jwt):
 
 @app.route("/guest", methods=["GET"])
 def guest_login_endpoint():
+    """Login with guest credentials and return friend list"""
     uid = request.args.get('uid')
     password = request.args.get('password')
     if not uid or not password:
@@ -443,6 +452,7 @@ def guest_login_endpoint():
 
 @app.route("/access_token", methods=["GET"])
 def access_token_endpoint():
+    """Use Garena access token to get friend list directly"""
     access_token = request.args.get('access_token')
     if not access_token:
         return jsonify({"status": "error", "message": "Missing 'access_token' parameter"}), 400
@@ -461,5 +471,8 @@ def access_token_endpoint():
         "timestamp": int(time.time())
     })
 
+# Vercel serverless requires this (outside if __name__ block)
+app.debug = False
+
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000, debug=False)
+    app.run(host="0.0.0.0", port=5000)
