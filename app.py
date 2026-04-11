@@ -2,7 +2,6 @@
 import json
 import time
 from datetime import datetime
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, request, jsonify
 import requests
@@ -51,7 +50,7 @@ BASE_HEADERS = {
     'ReleaseVersion': FREEFIRE_VERSION,
 }
 
-# ========== Friend list helpers ==========
+# ========== Friend list helpers (sequential) ==========
 def encrypt_friend_payload(hex_data: str) -> bytes:
     raw = bytes.fromhex(hex_data)
     cipher = AES.new(FRIEND_KEY, AES.MODE_CBC, FRIEND_IV)
@@ -98,19 +97,14 @@ def fetch_from_server(base_url: str, jwt: str, timeout: int = 8):
         return None, str(e)
 
 def get_friend_list_from_jwt(jwt):
-    # Limit threads to 3 to avoid overloading serverless environment
-    with ThreadPoolExecutor(max_workers=3) as executor:
-        futures = {executor.submit(fetch_from_server, url, jwt): url for url in SERVER_BASE_URLS}
-        errors = []
-        for future in as_completed(futures):
-            result, error = future.result()
-            if result is not None:
-                # cancel remaining futures (best effort)
-                for f in futures:
-                    f.cancel()
-                return result[0], result[1]
-            errors.append(error)
-    return None, f"All servers failed: {errors[:3]}"
+    """Try each server sequentially, return first success."""
+    errors = []
+    for url in SERVER_BASE_URLS:
+        result, error = fetch_from_server(url, jwt)
+        if result is not None:
+            return result[0], result[1]  # friends, my_info
+        errors.append(f"{url}: {error}")
+    return None, f"All servers failed: {errors}"
 
 # ========== Login helpers ==========
 def encrypt_proto(payload_bytes):
