@@ -1,14 +1,11 @@
 # -*- coding: utf-8 -*-
 # Complete Free Fire API – Friend list directly from JWT, guest login, or access token
-# Deployable to Vercel as a serverless Flask application.
+# Deployable to Vercel – no temporary files, no external proto files.
 
-import os
 import sys
 import json
 import time
 import base64
-import tempfile
-import importlib.util
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -19,7 +16,7 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from google.protobuf import json_format
 
-# Disable SSL warnings (safe for this use case)
+# Disable SSL warnings
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -41,18 +38,23 @@ SERVER_BASE_URLS = [
     "https://client.us.freefiremobile.com",    # BR, NA
 ]
 
-# ----- Embedded Friends protobuf (from fr_list_pb2) -----
+# ----- Embedded Friends protobuf (fully self-contained) -----
+# This is the compiled source of fr_list_pb2.py
+_friends_pb2_src = '''
+# -*- coding: utf-8 -*-
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
-
 _sym_db = _symbol_database.Default()
-_friends_desc = _descriptor_pool.Default().AddSerializedFile(b'\n\rFriends.proto\"\"\n\x06\x46riend\x12\n\n\x02ID\x18\x01 \x01(\x03\x12\x0c\n\x04Name\x18\x03 \x01(\t\"#\n\x07\x46riends\x12\x18\n\x07\x66ield_1\x18\x01 \x03(\x0b\x32\x07.Friendb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\\n\\rFriends.proto\\"\\"\\n\\x06\\x46riend\\x12\\n\\n\\x02ID\\x18\\x01 \\x01(\\x03\\x12\\x0c\\n\\x04Name\\x18\\x03 \\x01(\\t\\"#\\n\\x07\\x46riends\\x12\\x18\\n\\x07\\x66ield_1\\x18\\x01 \\x03(\\x0b\\x32\\x07.Friendb\\x06proto3')
 _globals = globals()
-_builder.BuildMessageAndEnumDescriptors(_friends_desc, _globals)
-_builder.BuildTopDescriptorsAndMessages(_friends_desc, 'Friends_pb2', _globals)
-Friends = _globals.get('Friends')
+_builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
+_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'Friends_pb2', _globals)
+Friends = _globals['Friends']
+'''
+# Execute the source code to create the Friends class in this module's namespace
+exec(_friends_pb2_src, globals())
 
 def encrypt_friend_payload(hex_data: str) -> bytes:
     raw = bytes.fromhex(hex_data)
@@ -134,63 +136,39 @@ BASE_HEADERS = {
     'ReleaseVersion': "OB53"
 }
 
-# Base64 encoded protobuf definitions (MajorLoginReq, MajorLoginRes)
-LOGIN_REQ_B64 = "ChNNYWpvckxvZ2luUmVxLnByb3RvIvoKCgpNYWpvckxvZ2luEhIKCmV2ZW50X3RpbWUYAyABKAkSEQoJZ2FtZV9uYW1lGAQgASgJEhMKC3BsYXRmb3JtX2lkGAUgASgFEhYKDmNsaWVudF92ZXJzaW9uGAcgASgJEhcKD3N5c3RlbV9zb2Z0d2FyZRgIIAEoCRIXCg9zeXN0ZW1faGFyZHdhcmUYCSABKAkSGAoQdGVsZWNvbV9vcGVyYXRvchgKIAEoCRIUCgxuZXR3b3JrX3R5cGUYCyABKAkSFAoMc2NyZWVuX3dpZHRoGAwgASgNEhUKDXNjcmVlbl9oZWlnaHQYDSABKA0SEgoKc2NyZWVuX2RwaRgOIAEoCRIZChFwcm9jZXNzb3JfZGV0YWlscxgPIAEoCRIOCgZtZW1vcnkYECABKA0SFAoMZ3B1X3JlbmRlcmVyGBEgASgJEhMKC2dwdV92ZXJzaW9uGBIgASgJEhgKEHVuaXF1ZV9kZXZpY2VfaWQYEyABKAkSEQoJY2xpZW50X2lwGBQgASgJEhAKCGxhbmd1YWdlGBUgASgJEg8KB29wZW5faWQYFiABKAkSFAoMb3Blbl9pZF90eXBlGBcgASgJEhMKC2RldmljZV90eXBlGBggASgJEicKEG1lbW9yeV9hdmFpbGFibGUYGSABKAsyDS5HYW1lU2VjdXJpdHkSFAoMYWNjZXNzX3Rva2VuGB0gASgJEhcKD3BsYXRmb3JtX3Nka19pZBgeIAEoBRIaChJuZXR3b3JrX29wZXJhdG9yX2EYKSABKAkSFgoObmV0d29ya190eXBlX2EYKiABKAkSHAoUY2xpZW50X3VzaW5nX3ZlcnNpb24YOSABKAkSHgoWZXh0ZXJuYWxfc3RvcmFnZV90b3RhbBg8IAEoBRIiChpleHRlcm5hbF9zdG9yYWdlX2F2YWlsYWJsZRg9IAEoBRIeChhpbnRlcm5hbF9zdG9yYWdlX3RvdGFsGD4gASgFEiIKGmludGVybmFsX3N0b3JhZ2VfYXZhaWxhYmxlGD8gASgFEiMKG2dhbWVfZGlza19zdG9yYWdlX2F2YWlsYWJsZRhAIAEoBRIfChdnYW1lX2Rpc2tfc3RvcmFnZV90b3RhbBhBIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfYXZhaWxfc3RvcmFnZRhCIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfdG90YWxfc3RvcmFnZRhDIAEoBRIQCghsb2dpbl9ieRhJIAEoBRIUCgxsaWJyYXJ5X3BhdGgYSiABKAkSEgoKcmVnX2F2YXRhchhMIAEoBRIVCg1saWJyYXJ5X3Rva2VuGE0gASgJEhQKDGNoYW5uZWxfdHlwZRhOIAEoBRIQCghjcHVfdHlwZRhPIAEoBRIYChBjcHVfYXJjaGl0ZWN0dXJlGFEgASgJEhsKE2NsaWVudF92ZXJzaW9uX2NvZGUYUyABKAkSFAoMZ3JhcGhpY3NfYXBpGFYgASgJEh0KFXN1cHBvcnRlZF9hc3RjX2JpdHNldBhXIAEoDRIaChJsb2dpbl9vcGVuX2lkX3R5cGUYWCABKAUSGAoQYW5hbHl0aWNzX2RldGFpbBhZIAEoDBIUCgxsb2FkaW5nX3RpbWUYXCABKA0SFwoPcmVsZWFzZV9jaGFubmVsGF0gASgJEhIKCmV4dHJhX2luZm8YXiABKAkSIAoYYW5kcm9pZF9lbmdpbmVfaW5pdF9mbGFnGF8gASgNEg8KB2lmX3B1c2gYYSABKAUSDgoGaXNfdnBuGGIgASgFEhwKFG9yaWdpbl9wbGF0Zm9ybV90eXBlGGMgASgJEh0KFXByaW1hcnlfcGxhdGZvcm1fdHlwZRhkIAEoCSI1CgxHYW1lU2VjdXJpdHkSDwoHdmVyc2lvbhgGIAEoBRIUCgxoaWRkZW5fdmFsdWUYCCABKARiBnByb3RvMw=="
-LOGIN_RES_B64 = "ChNNYWpvckxvZ2luUmVzLnByb3RvInwKDU1ham9yTG9naW5SZXMSEwoLYWNjb3VudF91aWQYASABKAQSDgoGcmVnaW9uGAIgASgJEg0KBXRva2VuGAggASgJEgsKA3VybBgKIAEoCRIRCgl0aW1lc3RhbXAYFSABKAMSCwoDa2V5GBYgASgMEgoKAml2GBcgASgMYgZwcm90bzM="
-
-def load_login_protobufs():
-    """Dynamically load MajorLoginReq and MajorLoginRes from embedded base64."""
-    temp_dir = tempfile.mkdtemp()
-    classes = {}
-    # MajorLoginReq
-    req_code = f'''# -*- coding: utf-8 -*-
+# ----- Embedded MajorLoginReq and MajorLoginRes protobufs (compiled sources) -----
+_major_login_req_pb2_src = '''
+# -*- coding: utf-8 -*-
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
 import base64
 _sym_db = _symbol_database.Default()
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(base64.b64decode("{LOGIN_REQ_B64}"))
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(base64.b64decode("ChNNYWpvckxvZ2luUmVxLnByb3RvIvoKCgpNYWpvckxvZ2luEhIKCmV2ZW50X3RpbWUYAyABKAkSEQoJZ2FtZV9uYW1lGAQgASgJEhMKC3BsYXRmb3JtX2lkGAUgASgFEhYKDmNsaWVudF92ZXJzaW9uGAcgASgJEhcKD3N5c3RlbV9zb2Z0d2FyZRgIIAEoCRIXCg9zeXN0ZW1faGFyZHdhcmUYCSABKAkSGAoQdGVsZWNvbV9vcGVyYXRvchgKIAEoCRIUCgxuZXR3b3JrX3R5cGUYCyABKAkSFAoMc2NyZWVuX3dpZHRoGAwgASgNEhUKDXNjcmVlbl9oZWlnaHQYDSABKA0SEgoKc2NyZWVuX2RwaRgOIAEoCRIZChFwcm9jZXNzb3JfZGV0YWlscxgPIAEoCRIOCgZtZW1vcnkYECABKA0SFAoMZ3B1X3JlbmRlcmVyGBEgASgJEhMKC2dwdV92ZXJzaW9uGBIgASgJEhgKEHVuaXF1ZV9kZXZpY2VfaWQYEyABKAkSEQoJY2xpZW50X2lwGBQgASgJEhAKCGxhbmd1YWdlGBUgASgJEg8KB29wZW5faWQYFiABKAkSFAoMb3Blbl9pZF90eXBlGBcgASgJEhMKC2RldmljZV90eXBlGBggASgJEicKEG1lbW9yeV9hdmFpbGFibGUYGSABKAsyDS5HYW1lU2VjdXJpdHkSFAoMYWNjZXNzX3Rva2VuGB0gASgJEhcKD3BsYXRmb3JtX3Nka19pZBgeIAEoBRIaChJuZXR3b3JrX29wZXJhdG9yX2EYKSABKAkSFgoObmV0d29ya190eXBlX2EYKiABKAkSHAoUY2xpZW50X3VzaW5nX3ZlcnNpb24YOSABKAkSHgoWZXh0ZXJuYWxfc3RvcmFnZV90b3RhbBg8IAEoBRIiChpleHRlcm5hbF9zdG9yYWdlX2F2YWlsYWJsZRg9IAEoBRIeChhpbnRlcm5hbF9zdG9yYWdlX3RvdGFsGD4gASgFEiIKGmludGVybmFsX3N0b3JhZ2VfYXZhaWxhYmxlGD8gASgFEiMKG2dhbWVfZGlza19zdG9yYWdlX2F2YWlsYWJsZRhAIAEoBRIfChdnYW1lX2Rpc2tfc3RvcmFnZV90b3RhbBhBIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfYXZhaWxfc3RvcmFnZRhCIAEoBRIlCh1leHRlcm5hbF9zZGNhcmRfdG90YWxfc3RvcmFnZRhDIAEoBRIQCghsb2dpbl9ieRhJIAEoBRIUCgxsaWJyYXJ5X3BhdGgYSiABKAkSEgoKcmVnX2F2YXRhchhMIAEoBRIVCg1saWJyYXJ5X3Rva2VuGE0gASgJEhQKDGNoYW5uZWxfdHlwZRhOIAEoBRIQCghjcHVfdHlwZRhPIAEoBRIYChBjcHVfYXJjaGl0ZWN0dXJlGFEgASgJEhsKE2NsaWVudF92ZXJzaW9uX2NvZGUYUyABKAkSFAoMZ3JhcGhpY3NfYXBpGFYgASgJEh0KFXN1cHBvcnRlZF9hc3RjX2JpdHNldBhXIAEoDRIaChJsb2dpbl9vcGVuX2lkX3R5cGUYWCABKAUSGAoQYW5hbHl0aWNzX2RldGFpbBhZIAEoDBIUCgxsb2FkaW5nX3RpbWUYXCABKA0SFwoPcmVsZWFzZV9jaGFubmVsGF0gASgJEhIKCmV4dHJhX2luZm8YXiABKAkSIAoYYW5kcm9pZF9lbmdpbmVfaW5pdF9mbGFnGF8gASgNEg8KB2lmX3B1c2gYYSABKAUSDgoGaXNfdnBuGGIgASgFEhwKFG9yaWdpbl9wbGF0Zm9ybV90eXBlGGMgASgJEh0KFXByaW1hcnlfcGxhdGZvcm1fdHlwZRhkIAEoCSI1CgxHYW1lU2VjdXJpdHkSDwoHdmVyc2lvbhgGIAEoBRIUCgxoaWRkZW5fdmFsdWUYCCABKARiBnByb3RvMw=="))
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'MajorLoginReq_pb2', _globals)
+MajorLogin = _globals['MajorLogin']
+GameSecurity = _globals['GameSecurity']
 '''
-    req_path = os.path.join(temp_dir, 'MajorLoginReq_pb2.py')
-    with open(req_path, 'w') as f:
-        f.write(req_code)
-    spec = importlib.util.spec_from_file_location("MajorLoginReq_pb2", req_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["MajorLoginReq_pb2"] = module
-    spec.loader.exec_module(module)
-    classes['MajorLoginReq'] = module.MajorLogin
-    classes['GameSecurity'] = module.GameSecurity
-    # MajorLoginRes
-    res_code = f'''# -*- coding: utf-8 -*-
+_major_login_res_pb2_src = '''
+# -*- coding: utf-8 -*-
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import descriptor_pool as _descriptor_pool
 from google.protobuf import symbol_database as _symbol_database
 from google.protobuf.internal import builder as _builder
 import base64
 _sym_db = _symbol_database.Default()
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(base64.b64decode("{LOGIN_RES_B64}"))
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(base64.b64decode("ChNNYWpvckxvZ2luUmVzLnByb3RvInwKDU1ham9yTG9naW5SZXMSEwoLYWNjb3VudF91aWQYASABKAQSDgoGcmVnaW9uGAIgASgJEg0KBXRva2VuGAggASgJEgsKA3VybBgKIAEoCRIRCgl0aW1lc3RhbXAYFSABKAMSCwoDa2V5GBYgASgMEgoKAml2GBcgASgMYgZwcm90bzM="))
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'MajorLoginRes_pb2', _globals)
+MajorLoginRes = _globals['MajorLoginRes']
 '''
-    res_path = os.path.join(temp_dir, 'MajorLoginRes_pb2.py')
-    with open(res_path, 'w') as f:
-        f.write(res_code)
-    spec = importlib.util.spec_from_file_location("MajorLoginRes_pb2", res_path)
-    module = importlib.util.module_from_spec(spec)
-    sys.modules["MajorLoginRes_pb2"] = module
-    spec.loader.exec_module(module)
-    classes['MajorLoginRes'] = module.MajorLoginRes
-    return classes
-
-login_pb = load_login_protobufs()
-MajorLoginReq = login_pb['MajorLoginReq']
-GameSecurity = login_pb['GameSecurity']
-MajorLoginRes = login_pb['MajorLoginRes']
+# Execute both to make the classes available
+exec(_major_login_req_pb2_src, globals())
+exec(_major_login_res_pb2_src, globals())
 
 def encrypt_proto(payload_bytes):
     cipher = AES.new(PROTO_KEY, AES.MODE_CBC, PROTO_IV)
@@ -204,8 +182,7 @@ def decrypt_proto(encrypted_bytes):
         return None
 
 def build_major_login_message(open_id, access_token, platform_type=4):
-    """Build MajorLoginReq protobuf message. platform_type sets origin/primary platform."""
-    msg = MajorLoginReq()
+    msg = MajorLogin()
     # Basic fields
     msg.event_time = str(datetime.now())[:-7]
     msg.game_name = "free fire"
@@ -323,7 +300,7 @@ def get_jwt_from_guest(uid, password):
     open_id, access_token, err = generate_access_token(uid, password)
     if err:
         return None, f"Token generation failed: {err}"
-    # Try multiple platform types (2,3,4,6,8) – some accounts need a specific one
+    # Try multiple platform types
     for pt in [2, 3, 4, 6, 8]:
         success, login_data = major_login(open_id, access_token, pt)
         if success:
@@ -331,8 +308,6 @@ def get_jwt_from_guest(uid, password):
     return None, "All platform types failed in MajorLogin"
 
 def get_jwt_from_access_token(access_token):
-    """Obtain JWT from a Garena access token."""
-    # First get open_id from token inspect endpoint
     inspect_url = f"https://100067.connect.garena.com/oauth/token/inspect?token={access_token}"
     try:
         resp = requests.get(inspect_url, timeout=10)
@@ -341,10 +316,9 @@ def get_jwt_from_access_token(access_token):
         data = resp.json()
         open_id = data.get('open_id')
         if not open_id:
-            return None, "open_id not found in inspect response"
+            return None, "open_id not found"
     except Exception as e:
         return None, str(e)
-    # Try platform types
     for pt in [2, 3, 4, 6, 8]:
         success, login_data = major_login(open_id, access_token, pt)
         if success:
@@ -362,8 +336,7 @@ def home():
             "jwt": "/<JWT>",
             "guest": "/guest?uid=<uid>&password=<password>",
             "access_token": "/access_token?access_token=<access_token>"
-        },
-        "info": "All endpoints return the friend list directly."
+        }
     })
 
 @app.route("/<path:jwt>", methods=["GET"])
@@ -423,8 +396,6 @@ def access_token_login():
         "timestamp": int(time.time())
     })
 
-# ============================================================================
 # For local development
-# ============================================================================
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
