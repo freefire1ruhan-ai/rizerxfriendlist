@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 # Complete Free Fire API – Friend list directly from JWT, guest login, or access token
-# Deployable to Vercel – no temporary files, no external proto files.
+# Deployable to Vercel – uses separate fr_list_pb2.py file (included in repo)
 
 import sys
 import json
@@ -16,7 +16,9 @@ from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from google.protobuf import json_format
 
-# Disable SSL warnings
+# Import the compiled Friends protobuf
+import fr_list_pb2
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 app = Flask(__name__)
@@ -38,31 +40,13 @@ SERVER_BASE_URLS = [
     "https://client.us.freefiremobile.com",    # BR, NA
 ]
 
-# ----- Embedded Friends protobuf (fully self-contained) -----
-# This is the compiled source of fr_list_pb2.py
-_friends_pb2_src = '''
-# -*- coding: utf-8 -*-
-from google.protobuf import descriptor as _descriptor
-from google.protobuf import descriptor_pool as _descriptor_pool
-from google.protobuf import symbol_database as _symbol_database
-from google.protobuf.internal import builder as _builder
-_sym_db = _symbol_database.Default()
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\\n\\rFriends.proto\\"\\"\\n\\x06\\x46riend\\x12\\n\\n\\x02ID\\x18\\x01 \\x01(\\x03\\x12\\x0c\\n\\x04Name\\x18\\x03 \\x01(\\t\\"#\\n\\x07\\x46riends\\x12\\x18\\n\\x07\\x66ield_1\\x18\\x01 \\x03(\\x0b\\x32\\x07.Friendb\\x06proto3')
-_globals = globals()
-_builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
-_builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'Friends_pb2', _globals)
-Friends = _globals['Friends']
-'''
-# Execute the source code to create the Friends class in this module's namespace
-exec(_friends_pb2_src, globals())
-
 def encrypt_friend_payload(hex_data: str) -> bytes:
     raw = bytes.fromhex(hex_data)
     cipher = AES.new(FRIEND_KEY, AES.MODE_CBC, FRIEND_IV)
     return cipher.encrypt(pad(raw, AES.block_size))
 
 def parse_friend_response(content_bytes: bytes):
-    pb = Friends()
+    pb = fr_list_pb2.Friends()
     pb.ParseFromString(content_bytes)
     parsed = json.loads(json_format.MessageToJson(pb))
     raw_list = []
@@ -103,7 +87,6 @@ def fetch_from_server(base_url: str, jwt: str, timeout: int = 10):
         return None, str(e)
 
 def get_friend_list_from_jwt(jwt):
-    """Return (friends_list, my_info) or (None, error_message)."""
     with ThreadPoolExecutor(max_workers=len(SERVER_BASE_URLS)) as executor:
         future_to_url = {executor.submit(fetch_from_server, url, jwt): url for url in SERVER_BASE_URLS}
         errors = []
@@ -117,7 +100,7 @@ def get_friend_list_from_jwt(jwt):
     return None, f"All servers failed: {errors[:3]}"
 
 # ============================================================================
-# 2. Guest login (uid + password → JWT)
+# 2. Guest login (uid + password → JWT) – embedded protobufs for login flow
 # ============================================================================
 OAUTH_URL = "https://100067.connect.garena.com/oauth/guest/token/grant"
 MAJOR_LOGIN_URL = "https://loginbp.ggblueshark.com/MajorLogin"
@@ -136,7 +119,7 @@ BASE_HEADERS = {
     'ReleaseVersion': "OB53"
 }
 
-# ----- Embedded MajorLoginReq and MajorLoginRes protobufs (compiled sources) -----
+# ----- Embedded MajorLoginReq and MajorLoginRes protobufs (self-contained) -----
 _major_login_req_pb2_src = '''
 # -*- coding: utf-8 -*-
 from google.protobuf import descriptor as _descriptor
@@ -205,7 +188,6 @@ def build_major_login_message(open_id, access_token, platform_type=4):
     msg.open_id = open_id
     msg.open_id_type = "4"
     msg.device_type = "Handheld"
-    # memory_available sub-message
     if hasattr(msg, 'memory_available'):
         msg.memory_available.version = 55
         msg.memory_available.hidden_value = 81
@@ -214,7 +196,7 @@ def build_major_login_message(open_id, access_token, platform_type=4):
     msg.network_operator_a = "Verizon"
     msg.network_type_a = "WIFI"
     msg.client_using_version = "7428b253defc164018c604a1ebbfebdf"
-    # Optional storage fields (set only if they exist)
+    # Optional storage fields
     optional_fields = [
         ('external_storage_total', 36235),
         ('external_storage_available', 31335),
@@ -279,7 +261,6 @@ def major_login(open_id, access_token, platform_type=4):
         if resp.status_code != 200:
             return False, f"HTTP {resp.status_code}"
         data = resp.content
-        # Try decryption first
         if len(data) % 16 == 0:
             dec = decrypt_proto(data)
             if dec:
@@ -287,7 +268,6 @@ def major_login(open_id, access_token, platform_type=4):
                 res.ParseFromString(dec)
                 if res.token:
                     return True, {'token': res.token, 'account_uid': res.account_uid, 'region': res.region, 'url': res.url}
-        # Fallback: parse directly
         res = MajorLoginRes()
         res.ParseFromString(data)
         if res.token:
@@ -300,7 +280,6 @@ def get_jwt_from_guest(uid, password):
     open_id, access_token, err = generate_access_token(uid, password)
     if err:
         return None, f"Token generation failed: {err}"
-    # Try multiple platform types
     for pt in [2, 3, 4, 6, 8]:
         success, login_data = major_login(open_id, access_token, pt)
         if success:
@@ -396,6 +375,5 @@ def access_token_login():
         "timestamp": int(time.time())
     })
 
-# For local development
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5000, debug=False)
