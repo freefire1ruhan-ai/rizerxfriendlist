@@ -1,7 +1,0 @@
-Flask
-requests
-pycryptodome
-protobuf
-rich
-pycurl
-protobuf
